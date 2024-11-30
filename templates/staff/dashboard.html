@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Welcome Header -->
+    <div class="dashboard-header">
+        <div class="welcome-section">
+            <div class="profile-circle pulse-animation">
+                {% if session.profile_image %}
+                    <img src="{{ url_for('static', filename='uploads/' + session.profile_image) }}" 
+                         alt="Profile" class="profile-image">
+                {% else %}
+                    <i class="fas fa-user-circle"></i>
+                {% endif %}
+            </div>
+            <div>
+                <h2>Welcome back, {{ session.username }}</h2>
+                <p><i class="fas fa-calendar-alt me-2"></i>{{ current_date }}</p>
+            </div>
+        </div>
+        <div class="notifications-badge hover-effect" onclick="toggleNotifications()">
+            <i class="fas fa-bell"></i>
+            {% if notifications|length > 0 %}
+                <span class="badge">{{ notifications|length }}</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-container">
+        <div class="stat-card primary hover-lift">
+            <div class="stat-content">
+                <h6>Total Children</h6>
+                <h3>{{ stats.total_children }}</h3>
+                <p>Active Residents</p>
+            </div>
+            <div class="stat-icon">
+                <i class="fas fa-child"></i>
+            </div>
+        </div>
+
+        <div class="stat-card success hover-lift">
+            <div class="stat-content">
+                <h6>Today's Attendance</h6>
+                <h3>{{ stats.today_attendance }}</h3>
+                <p>Children Present</p>
+            </div>
+            <div class="stat-icon">
+                <i class="fas fa-clipboard-check"></i>
+            </div>
+        </div>
+
+        <div class="stat-card warning hover-lift">
+            <div class="stat-content">
+                <h6>Pending Tasks</h6>
+                <h3>{{ stats.pending_tasks }}</h3>
+                <p>Tasks to Complete</p>
+            </div>
+            <div class="stat-icon">
+                <i class="fas fa-tasks"></i>
+            </div>
+        </div>
+
+        <div class="stat-card info hover-lift">
+            <div class="stat-content">
+                <h6>Today's Activities</h6>
+                <h3>{{ stats.todays_activities }}</h3>
+                <p>Scheduled Events</p>
+            </div>
+            <div class="stat-icon">
+                <i class="fas fa-calendar-day"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Content -->
+    <div class="dashboard-grid">
+        <!-- Quick Actions -->
+        <div class="grid-item">
+            <div class="card hover-shadow">
+                <div class="card-header">
+                    <h5><i class="fas fa-bolt me-2"></i>Quick Actions</h5>
+                </div>
+                <div class="quick-actions">
+                    <a href="{{ url_for('add_child') }}" class="action-btn slide-up">
+                        <i class="fas fa-user-plus"></i>
+                        <span>Add Child</span>
+                    </a>
+                    <a href="{{ url_for('mark_attendance') }}" class="action-btn slide-up">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>Mark Attendance</span>
+                    </a>
+                    <a href="{{ url_for('report_incident') }}" class="action-btn slide-up">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>Report Incident</span>
+                    </a>
+                    <a href="{{ url_for('manage_activities') }}" class="action-btn slide-up">
+                        <i class="fas fa-calendar-plus"></i>
+                        <span>Add Activity</span>
+                    </a>
+                    <a href="{{ url_for('view_financial_records') }}" class="action-btn slide-up">
+                        <i class="fas fa-money-bill-wave"></i>
+                        <span>Financial Records</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activities -->
+        <div class="grid-item">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="fas fa-history me-2"></i>Recent Activities</h5>
+                    <a href="{{ url_for('manage_activities') }}" class="btn btn-primary btn-sm">View All</a>
+                </div>
+                <div class="activities-list">
+                    {% for activity in recent_activities %}
+                    <div class="activity-item">
+                        <div class="activity-icon">
+                            <i class="fas fa-calendar-check"></i>
+                        </div>
+                        <div class="activity-details">
+                            <h6>{{ activity.title }}</h6>
+                            <p>{{ activity.date }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %} 
