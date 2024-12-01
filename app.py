@@ -108,26 +108,51 @@ def login():
         username = request.form['username']
         password = request.form['password']
         
-        # Check for static admin credentials
-        if username == "System Admin" and password == "ADMIN2027254@@":
-            session.permanent = True
-            session['username'] = username
-            session['role'] = 'admin'
-            session['user_id'] = 'admin'
-            flash('Logged in successfully!', 'success')
-            return redirect(url_for('admin_dashboard'))
+        try:
+            app.logger.info(f"Login attempt for username: {username}")
             
-        # Regular user authentication
-        user = db.users.find_one({'username': username})
-        if user and check_password_hash(user['password'], password):
-            session.permanent = True
-            session['username'] = user['username']
-            session['role'] = user['role']
-            session['user_id'] = str(user['_id'])
-            flash('Logged in successfully!', 'success')
-            return redirect(url_for('staff_dashboard'))
+            # Check for static admin credentials
+            if username == "System Admin" and password == "ADMIN2027254@@":
+                session.permanent = True
+                session['username'] = username
+                session['role'] = 'admin'
+                session['user_id'] = 'admin'
+                flash('Logged in successfully!', 'success')
+                app.logger.info("Admin login successful")
+                return redirect(url_for('admin_dashboard'))
             
-        flash('Invalid username or password', 'error')
+            # Regular user authentication
+            user = db.users.find_one({'username': username})
+            if user and check_password_hash(user['password'], password):
+                session.permanent = True
+                session['username'] = user['username']
+                session['role'] = user['role']
+                session['user_id'] = str(user['_id'])
+                
+                app.logger.info(f"User login successful. Role: {user['role']}")
+                
+                # Role-specific redirects
+                role_redirects = {
+                    'staff': 'staff_dashboard',
+                    'nurse': 'nurse_dashboard',
+                    'teacher': 'teacher_dashboard'
+                }
+                
+                if user['role'] in role_redirects:
+                    flash(f'Welcome, {user["username"]}!', 'success')
+                    return redirect(url_for(role_redirects[user['role']]))
+                else:
+                    app.logger.error(f"Invalid role: {user['role']}")
+                    flash('Invalid user role', 'error')
+                    return redirect(url_for('login'))
+                    
+            app.logger.warning(f"Failed login attempt for username: {username}")
+            flash('Invalid username or password', 'error')
+            
+        except Exception as e:
+            app.logger.error(f"Login error: {str(e)}")
+            flash('An error occurred during login', 'error')
+            
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -211,39 +236,22 @@ def admin_dashboard():
 @role_required(['staff'])
 def staff_dashboard():
     try:
-        if 'username' not in session:
-            flash('Please login to continue', 'error')
+        user_data = db.users.find_one({'username': session['username']})
+        if not user_data:
+            flash('User not found', 'error')
             return redirect(url_for('login'))
-
-        # Calculate dashboard statistics
+            
+        # Get relevant data for staff dashboard
         stats = {
-            'total_children': db.children.count_documents({'status': 'active'}),
-            'today_attendance': db.attendance.count_documents({
-                'date': datetime.now().strftime('%Y-%m-%d')
-            }),
-            'pending_tasks': db.tasks.count_documents({'status': 'pending'}),
-            'todays_activities': db.activities.count_documents({
-                'date': datetime.now().strftime('%Y-%m-%d')
-            })
+            'total_children': db.children.count_documents({}),
+            'recent_activities': list(db.system_logs.find().sort('timestamp', -1).limit(5))
         }
-
-        # Get recent activities
-        recent_activities = list(db.activities.find().sort('date', -1).limit(5))
         
-        # Get notifications
-        notifications = list(db.notifications.find({
-            'user_id': ObjectId(session['user_id']),
-            'read': False
-        }).limit(5))
-
-        return render_template('staff/dashboard.html',
-                             stats=stats,
-                             recent_activities=recent_activities,
-                             notifications=notifications,
-                             current_date=datetime.now().strftime("%B %d, %Y"))
-
+        return render_template('staff/dashboard.html', 
+                             user=user_data,
+                             stats=stats)
     except Exception as e:
-        app.logger.error(f"Dashboard error: {str(e)}")
+        app.logger.error(f"Staff Dashboard error: {str(e)}")
         flash('Error loading dashboard', 'error')
         return redirect(url_for('login'))
 
@@ -552,12 +560,15 @@ def handle_exception(e):
 @role_required(['nurse'])
 def nurse_dashboard():
     try:
-        # Get current date
-        current_date = datetime.now().strftime("%B %d, %Y")
+        app.logger.info("Loading nurse dashboard")
+        user_data = db.users.find_one({'username': session['username']})
+        if not user_data:
+            flash('User not found', 'error')
+            return redirect(url_for('login'))
         
         # Dashboard data
         dashboard_data = {
-            'current_date': current_date,
+            'current_date': datetime.now().strftime("%B %d, %Y"),
             'total_children': db.children.count_documents({}),
             'pending_checkups': db.health_records.count_documents({
                 'type': 'checkup',
@@ -568,6 +579,7 @@ def nurse_dashboard():
         
         return render_template(
             'nurse/dashboard.html',
+            user=user_data,
             **dashboard_data
         )
                              
@@ -653,26 +665,32 @@ if __name__ == '__main__':
 @app.route('/teacher_dashboard')
 @role_required(['teacher'])
 def teacher_dashboard():
-    # Get current date
-    current_date = datetime.now().strftime("%B %d, %Y")
-    
-    # Get dashboard statistics
-    total_students = db.children.count_documents({})
-    total_subjects = db.subjects.count_documents({})
-    pending_assessments = db.academic_records.count_documents({'status': 'pending'})
-    
-    # Get recent academic records
-    recent_records = list(db.academic_records
-        .find({})
-        .sort('created_at', -1)
-        .limit(5))
-    
-    return render_template('teacher/dashboard.html',
-                         current_date=current_date,
-                         total_students=total_students,
-                         total_subjects=total_subjects,
-                         pending_assessments=pending_assessments,
-                         recent_records=recent_records)
+    try:
+        app.logger.info("Loading teacher dashboard")
+        user_data = db.users.find_one({'username': session['username']})
+        if not user_data:
+            flash('User not found', 'error')
+            return redirect(url_for('login'))
+        
+        # Get dashboard statistics
+        dashboard_data = {
+            'current_date': datetime.now().strftime("%B %d, %Y"),
+            'total_students': db.children.count_documents({}),
+            'total_subjects': db.subjects.count_documents({}),
+            'pending_assessments': db.academic_records.count_documents({'status': 'pending'}),
+            'recent_records': list(db.academic_records.find().sort('created_at', -1).limit(5))
+        }
+        
+        return render_template(
+            'teacher/dashboard.html',
+            user=user_data,
+            **dashboard_data
+        )
+                             
+    except Exception as e:
+        app.logger.error(f"Error in teacher dashboard: {str(e)}")
+        flash('An error occurred while loading the dashboard.', 'error')
+        return redirect(url_for('login'))
 
 @app.route('/student_assessment', methods=['GET', 'POST'])
 @role_required(['teacher'])
