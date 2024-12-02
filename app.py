@@ -463,48 +463,40 @@ def add_health_record():
 @app.route('/academic_records')
 @role_required(['teacher'])
 def academic_records():
-    # Get filter parameters
-    student_id = request.args.get('student_id')
-    subject = request.args.get('subject')
-    date_from = request.args.get('date_from')
-    date_to = request.args.get('date_to')
-    
-    # Build query
-    query = {}
-    if student_id:
-        query['student_id'] = ObjectId(student_id)
-    if subject:
-        query['subject'] = subject
-    if date_from and date_to:
-        query['date'] = {
-            '$gte': datetime.strptime(date_from, '%Y-%m-%d'),
-            '$lte': datetime.strptime(date_to, '%Y-%m-%d')
-        }
-    
-    # Get records with pagination
-    page = int(request.args.get('page', 1))
-    per_page = 10
-    skip = (page - 1) * per_page
-    
-    records = list(db.academic_records
-        .find(query)
-        .sort('date', -1)
-        .skip(skip)
-        .limit(per_page))
-    
-    total_records = db.academic_records.count_documents(query)
-    total_pages = (total_records + per_page - 1) // per_page
-    
-    # Get students and subjects for filters
-    students = list(db.children.find())
-    subjects = list(db.subjects.find())
-    
-    return render_template('teacher/academic_records.html',
-                         records=records,
-                         students=students,
-                         subjects=subjects,
-                         current_page=page,
-                         total_pages=total_pages)
+    try:
+        # Fetch all academic records with student and subject details
+        records = list(db.academic_records.aggregate([
+            {
+                '$lookup': {
+                    'from': 'children',
+                    'localField': 'student_id',
+                    'foreignField': '_id',
+                    'as': 'student'
+                }
+            },
+            {
+                '$lookup': {
+                    'from': 'subjects',
+                    'localField': 'subject_id',
+                    'foreignField': '_id',
+                    'as': 'subject'
+                }
+            },
+            {
+                '$sort': {'date': -1}
+            }
+        ]))
+        
+        # Get all subjects for the filter dropdown
+        subjects = list(db.subjects.find())
+        
+        return render_template('teacher/academic_records.html',
+                             records=records,
+                             subjects=subjects)
+    except Exception as e:
+        app.logger.error(f"Error fetching academic records: {str(e)}")
+        flash('Error loading academic records', 'error')
+        return redirect(url_for('teacher_dashboard'))
 
 @app.route('/add_academic_record', methods=['GET', 'POST'])
 @role_required(['staff', 'teacher'])
@@ -574,8 +566,26 @@ def nurse_dashboard():
                 'type': 'checkup',
                 'status': 'pending'
             }),
+            'today_appointments': db.health_records.count_documents({
+                'date': datetime.now().strftime("%Y-%m-%d"),
+                'type': 'appointment'
+            }),
             'recent_records': list(db.health_records.find().sort('date', -1).limit(5))
         }
+
+        # Process recent records to include child names
+        for record in dashboard_data['recent_records']:
+            if 'child_id' in record:
+                child = db.children.find_one({'_id': record['child_id']})
+                record['child_name'] = child['name'] if child else 'Unknown Child'
+            else:
+                record['child_name'] = 'Unknown Child'
+            
+            # Ensure date is formatted properly
+            if isinstance(record.get('date'), datetime):
+                record['date'] = record['date']
+            else:
+                record['date'] = datetime.now()  # fallback date
         
         return render_template(
             'nurse/dashboard.html',
@@ -738,36 +748,31 @@ def manage_subjects():
 @app.route('/student_progress')
 @role_required(['teacher'])
 def student_progress():
-    # Get student ID from query parameters
-    student_id = request.args.get('student_id')
-    
-    if student_id:
-        # Get student details
-        student = db.children.find_one({'_id': ObjectId(student_id)})
+    try:
+        # Fetch all students
+        students = list(db.children.find())
         
-        # Get student's academic records
-        records = list(db.academic_records
-            .find({'student_id': ObjectId(student_id)})
-            .sort('date', 1))
+        # Fetch progress data (you'll need to implement the logic to calculate this)
+        progress_data = calculate_student_progress()
         
-        # Calculate progress metrics
-        subjects = {}
-        for record in records:
-            if record['subject'] not in subjects:
-                subjects[record['subject']] = []
-            subjects[record['subject']].append({
-                'date': record['date'],
-                'grade': record['grade']
-            })
-        
-        return render_template('teacher/student_progress.html',
-                             student=student,
-                             subjects=subjects)
-    
-    # If no student selected, show student list
-    students = list(db.children.find())
-    return render_template('teacher/student_progress.html',
-                         students=students)
+        return render_template('teacher/progress_reports.html',
+                             students=students,
+                             progress_data=progress_data)
+    except Exception as e:
+        app.logger.error(f"Error loading progress reports: {str(e)}")
+        flash('Error loading progress reports', 'error')
+        return redirect(url_for('teacher_dashboard'))
+
+def calculate_student_progress():
+    # Implement your progress calculation logic here
+    # This should analyze academic records and return structured progress data
+    try:
+        progress_data = []
+        # Add your calculation logic here
+        return progress_data
+    except Exception as e:
+        app.logger.error(f"Error calculating progress: {str(e)}")
+        return []
 
 @app.route('/edit_assessment/<assessment_id>', methods=['GET', 'POST'])
 @role_required(['teacher'])

@@ -2,82 +2,96 @@
 
 {% block content %}
 <div class="container">
-    <h2>Student Progress Reports</h2>
+    <!-- Updated Back to Dashboard Button -->
+    <div class="mb-3 d-flex justify-content-end">
+        <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-primary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+    </div>
 
-    {% for report in reports %}
-    <div class="card mb-4">
+    <div class="card shadow-sm">
         <div class="card-header">
-            <h4>{{ report.child.name }}</h4>
+            <h2><i class="fas fa-chart-line me-2"></i>Student Progress Reports</h2>
         </div>
         <div class="card-body">
-            <!-- Academic Summary -->
+            <!-- Student Selection -->
             <div class="row mb-4">
-                <div class="col-md-12">
-                    <h5>Academic Summary</h5>
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Subject</th>
-                                <th>Average Grade</th>
-                                <th>Assessments Completed</th>
-                                <th>Last Assessment</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for assessment in report.assessments %}
-                            <tr>
-                                <td>{{ assessment.subject }}</td>
-                                <td>{{ assessment.grade }}</td>
-                                <td>{{ assessment.completed }}</td>
-                                <td>{{ assessment.last_date }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div class="col-md-6">
+                    <select class="form-control" id="studentSelect">
+                        <option value="">Select Student</option>
+                        {% for student in students %}
+                        <option value="{{ student._id }}">{{ student.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <select class="form-control" id="termSelect">
+                        <option value="current">Current Term</option>
+                        <option value="previous">Previous Term</option>
+                        <option value="all">All Terms</option>
+                    </select>
                 </div>
             </div>
 
-            <!-- Recent Assessments -->
-            <div class="row">
-                <div class="col-md-12">
-                    <h5>Recent Assessments</h5>
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Subject</th>
-                                <th>Type</th>
-                                <th>Score</th>
-                                <th>Grade</th>
-                                <th>Comments</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for assessment in report.assessments %}
-                            <tr>
-                                <td>{{ assessment.date }}</td>
-                                <td>{{ assessment.subject }}</td>
-                                <td>{{ assessment.assessment_type }}</td>
-                                <td>{{ assessment.score }}</td>
-                                <td>{{ assessment.grade }}</td>
-                                <td>{{ assessment.comments }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+            <!-- Progress Charts -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>Grade Distribution</h5>
+                            <canvas id="gradeChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5>Subject Performance</h5>
+                            <canvas id="subjectChart"></canvas>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Action Buttons -->
-            <div class="row mt-3">
-                <div class="col-md-12">
-                    <a href="#" class="btn btn-primary" onclick="window.print()">Print Report</a>
-                    <a href="{{ url_for('student_assessment') }}?child_id={{ report.child._id }}" 
-                       class="btn btn-success">Add Assessment</a>
-                </div>
+            <!-- Detailed Progress Table -->
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>Average Grade</th>
+                            <th>Trend</th>
+                            <th>Comments</th>
+                        </tr>
+                    </thead>
+                    <tbody id="progressTableBody">
+                        {% for progress in progress_data %}
+                        <tr>
+                            <td>{{ progress.subject }}</td>
+                            <td>{{ progress.average_grade }}</td>
+                            <td>
+                                {% if progress.trend == 'up' %}
+                                <i class="fas fa-arrow-up text-success"></i>
+                                {% elif progress.trend == 'down' %}
+                                <i class="fas fa-arrow-down text-danger"></i>
+                                {% else %}
+                                <i class="fas fa-equals text-warning"></i>
+                                {% endif %}
+                            </td>
+                            <td>{{ progress.comments }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
-    {% endfor %}
 </div>
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Add Chart.js initialization code here
+</script>
+{% endblock %}
 {% endblock %} 

@@ -2,6 +2,12 @@
 
 {% block content %}
 <div class="container">
+     <!-- Back to Dashboard Button -->
+     <div class="mb-3 d-flex justify-content-end">
+        <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-primary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+    </div>
     <h2>Manage Subjects</h2>
     
     <!-- Add Subject Form -->
