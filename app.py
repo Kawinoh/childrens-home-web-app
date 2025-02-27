@@ -8,9 +8,9 @@ from werkzeug.exceptions import HTTPException
 import logging
 import os
 from werkzeug.utils import secure_filename
-import imghdr  # For additional image validation
 import csv
 from io import StringIO
+from flask_socketio import SocketIO, emit
 
 from flask import Flask, render_template  # and your other imports
 
@@ -18,6 +18,7 @@ app = Flask(__name__,
     template_folder='templates',
     static_folder='static'
 )
+socketio = SocketIO(app)
 
 UPLOAD_FOLDER = 'static/uploads/children'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
@@ -31,7 +32,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to ses
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    if '.' not in filename:
+        return False
+    extension = filename.rsplit('.', 1)[1].lower()
+    return extension in ALLOWED_EXTENSIONS
 
 @app.template_filter('grade_color')
 def grade_color(grade):
@@ -1175,7 +1179,7 @@ def reset_user_password():
 
 @app.route('/admin/delete_user', methods=['DELETE'])
 @role_required(['admin'])
-def delete_user():
+def delete_user_api():
     data = request.get_json()
     username = data.get('username')
     
@@ -1248,5 +1252,83 @@ def send_password_reset_email(username, temp_password):
         return True
     return False
 
+@app.route('/admin/manage-users', methods=['GET', 'POST'])
+@role_required(['admin'])
+def manage_users():
+    if request.method == 'POST':
+        try:
+            username = request.form.get('username')
+            email = request.form.get('email')
+            password = request.form.get('password')
+            role = request.form.get('role')
+            
+            if db.users.find_one({'$or': [{'username': username}, {'email': email}]}):
+                return jsonify({'success': False, 'message': 'Username or email already exists'})
+            
+            user = {
+                'username': username,
+                'email': email,
+                'password': generate_password_hash(password),
+                'role': role,
+                'created_at': datetime.now(),
+                'created_by': session['username'],
+                'active': True,
+                'last_login': None
+            }
+            
+            db.users.insert_one(user)
+            log_action(f'Added new user: {username} with role: {role}')
+            
+            # Emit an event to update the user list in real-time
+            socketio.emit('user_added', user)
+            
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'message': str(e)})
+    
+    users = list(db.users.find({'username': {'$ne': 'System Admin'}}))
+    return render_template('admin/manage_users.html', users=users)
+
+@socketio.on('connect')
+def handle_connect():
+    emit('user_list', list(db.users.find()), broadcast=True)
+
+@app.route('/admin/delete-user/<user_id>')
+@role_required(['admin'])
+def delete_user(user_id):
+    user = db.users.find_one_and_delete({'_id': ObjectId(user_id)})
+    if user:
+        flash(f'User {user["username"]} deleted successfully', 'success')
+        log_action(f'Deleted user: {user["username"]}')
+    return redirect(url_for('manage_users'))
+
+@app.route('/messages', methods=['GET', 'POST'])
+@role_required(['admin', 'staff', 'teacher', 'nurse'])
+def messages():
+    if request.method == 'POST':
+        content = request.form.get('content')
+        recipients = request.form.getlist('recipients')
+        
+        message = {
+            'content': content,
+            'sender': session['username'],
+            'sender_role': session['role'],
+            'recipients': recipients,
+            'timestamp': datetime.now(),
+            'read_by': []
+        }
+        db.messages.insert_one(message)
+        flash('Message sent successfully', 'success')
+        
+    # Get messages for current user
+    messages = list(db.messages.find({
+        '$or': [
+            {'sender': session['username']},
+            {'recipients': {'$in': [session['role'], session['username']]}}
+        ]
+    }).sort('timestamp', -1))
+    
+    return render_template('messages.html', messages=messages)
+
 if __name__ == '__main__':
-    app.run(debug=True) 
+    socketio.run(app) 
