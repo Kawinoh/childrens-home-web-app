@@ -1,0 +1,5 @@
+{% for message in messages %}
+<div class="alert alert-info">
+    {{ message.message }} <small>Sent at: {{ message.sent_at.strftime('%Y-%m-%d %H:%M') }}</small>
+</div>
+{% endfor %} 

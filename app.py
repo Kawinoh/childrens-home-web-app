@@ -267,7 +267,7 @@ def logout():
 
 # Children Management Routes
 @app.route('/view_children')
-@role_required(['staff'])
+@role_required(['staff', 'teacher'])  # Added teacher role
 def view_children():
     if 'username' not in session:
         flash('Please login to continue', 'error')
@@ -288,7 +288,7 @@ def view_children():
         return redirect(url_for('staff_dashboard'))
 
 @app.route('/add_child', methods=['GET', 'POST'])
-@role_required(['staff'])
+@role_required(['staff', 'teacher'])  # Added teacher role
 def add_child():
     if 'username' not in session:
         flash('Session expired. Please login again.', 'error')
@@ -352,6 +352,18 @@ def generate_child_id():
     })
     # Format: CH23001 (CH + year + 3-digit sequential number)
     return f"{prefix}{year}{str(count + 1).zfill(3)}"
+
+# Socket.IO event handlers for real-time updates
+@socketio.on('child_update')
+def handle_child_update(data):
+    """Handle real-time child record updates"""
+    # Broadcast the update to all connected clients
+    emit('child_updated', data, broadcast=True)
+
+@socketio.on('notification')
+def handle_notification(data):
+    """Handle real-time notifications"""
+    emit('new_notification', data, broadcast=True)
 
 # Schedule Routes
 @app.route('/view_schedule')
@@ -1224,6 +1236,169 @@ def update_settings():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+# API Endpoints for Children Management
+@app.route('/api/children/<child_id>', methods=['GET'])
+@role_required(['admin', 'teacher', 'staff'])
+def get_child(child_id):
+    try:
+        child = db.children.find_one({'_id': ObjectId(child_id)})
+        if child:
+            child['_id'] = str(child['_id'])
+            child['age'] = calculate_age(child.get('date_of_birth'))
+            return jsonify(child)
+        return jsonify({'error': 'Child not found'}), 404
+    except Exception as e:
+        logger.error(f"Error in get_child: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/children/<child_id>', methods=['PUT'])
+@role_required(['admin', 'teacher', 'staff'])
+def update_child(child_id):
+    try:
+        child = db.children.find_one({'_id': ObjectId(child_id)})
+        if not child:
+            return jsonify({'error': 'Child not found'}), 404
+
+        # Get form data
+        update_data = {
+            'first_name': request.form.get('first_name'),
+            'last_name': request.form.get('last_name'),
+            'date_of_birth': request.form.get('date_of_birth'),
+            'guardian_name': request.form.get('guardian_name'),
+            'status': request.form.get('status'),
+            'last_updated': datetime.now(),
+            'updated_by': session.get('username')
+        }
+
+        # Handle photo upload
+        if 'photo' in request.files:
+            file = request.files['photo']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                update_data['photo'] = os.path.join('uploads/children', filename)
+
+        # Update database
+        db.children.update_one(
+            {'_id': ObjectId(child_id)},
+            {'$set': update_data}
+        )
+
+        # Log the action
+        log_action(f"Child record updated: {update_data['first_name']} {update_data['last_name']}")
+
+        # Emit real-time update
+        socketio.emit('child_updated', {
+            'child_id': child_id,
+            'updates': update_data,
+            'message': f"Child record updated: {update_data['first_name']} {update_data['last_name']}"
+        })
+
+        return jsonify({
+            'success': True,
+            'message': 'Child updated successfully',
+            'child': {**update_data, '_id': child_id}
+        })
+
+    except Exception as e:
+        logger.error(f"Error in update_child: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/children/<child_id>', methods=['DELETE'])
+@role_required(['admin', 'teacher'])
+def delete_child(child_id):
+    try:
+        result = db.children.delete_one({'_id': ObjectId(child_id)})
+        if result.deleted_count:
+            # Log the action
+            log_action(f"Child record deleted: {child_id}")
+            
+            # Emit real-time update
+            socketio.emit('child_deleted', {
+                'child_id': child_id,
+                'message': 'Child record deleted'
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': 'Child deleted successfully'
+            })
+        return jsonify({'error': 'Child not found'}), 404
+    except Exception as e:
+        logger.error(f"Error in delete_child: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# System Logs API
+@app.route('/api/logs')
+@role_required(['admin'])
+def get_system_logs():
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 50))
+        
+        total = db.system_logs.count_documents({})
+        logs = list(db.system_logs.find()
+                   .sort('timestamp', -1)
+                   .skip((page - 1) * per_page)
+                   .limit(per_page))
+        
+        for log in logs:
+            log['_id'] = str(log['_id'])
+            log['timestamp'] = log['timestamp'].isoformat()
+            
+        return jsonify({
+            'logs': logs,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        logger.error(f"Error in get_system_logs: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# System Settings API
+@app.route('/api/settings', methods=['GET', 'PUT'])
+@role_required(['admin'])
+def manage_settings():
+    if request.method == 'GET':
+        try:
+            settings = db.settings.find_one() or {}
+            settings['_id'] = str(settings.get('_id', ''))
+            return jsonify(settings)
+        except Exception as e:
+            logger.error(f"Error getting settings: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+    
+    elif request.method == 'PUT':
+        try:
+            settings_data = request.get_json()
+            result = db.settings.update_one(
+                {},
+                {'$set': {
+                    'site_name': settings_data.get('site_name'),
+                    'contact_email': settings_data.get('contact_email'),
+                    'max_children': settings_data.get('max_children'),
+                    'backup_enabled': settings_data.get('backup_enabled'),
+                    'notification_settings': settings_data.get('notification_settings'),
+                    'last_updated': datetime.now(),
+                    'updated_by': session.get('username')
+                }},
+                upsert=True
+            )
+            
+            # Log the action
+            log_action("System settings updated")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Settings updated successfully'
+            })
+        except Exception as e:
+            logger.error(f"Error updating settings: {str(e)}")
+            return jsonify({'error': 'Internal server error'}), 500
+
 # Add these helper functions near the top of the file, after imports
 
 def log_action(message):
@@ -1251,6 +1426,10 @@ def send_password_reset_email(username, temp_password):
         log_action(f'Password reset email would be sent to {username}')
         return True
     return False
+
+@socketio.on('connect')
+def handle_connect():
+    emit('user_list', list(db.users.find()), broadcast=True)
 
 @app.route('/admin/manage-users', methods=['GET', 'POST'])
 @role_required(['admin'])
@@ -1289,10 +1468,6 @@ def manage_users():
     users = list(db.users.find({'username': {'$ne': 'System Admin'}}))
     return render_template('admin/manage_users.html', users=users)
 
-@socketio.on('connect')
-def handle_connect():
-    emit('user_list', list(db.users.find()), broadcast=True)
-
 @app.route('/admin/delete-user/<user_id>')
 @role_required(['admin'])
 def delete_user(user_id):
@@ -1329,6 +1504,28 @@ def messages():
     }).sort('timestamp', -1))
     
     return render_template('messages.html', messages=messages)
+
+@app.route('/admin/send_message', methods=['POST'])
+@role_required(['admin'])
+def send_message():
+    data = request.get_json()
+    message = data.get('message')
+    
+    try:
+        # Logic to send message to all users
+        users = db.users.find()
+        for user in users:
+            # Here you can implement the logic to send the message
+            # For example, you could store it in a messages collection
+            db.messages.insert_one({
+                'username': user['username'],
+                'message': message,
+                'sent_at': datetime.now()
+            })
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
 
 if __name__ == '__main__':
     socketio.run(app) 
