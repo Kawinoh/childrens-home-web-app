@@ -9,27 +9,68 @@
         </a>
     </div>
 
+    <!-- Summary Card -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-primary"><i class="fas fa-users me-2"></i>Total Students</h5>
+                    <h2 class="mb-0">{{ students|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-success"><i class="fas fa-star me-2"></i>Average Grade</h5>
+                    <h2 class="mb-0">
+                        {% set avg = progress_data|map(attribute='average_grade')|select('string')|map('float')|list %}
+                        {% if avg and avg|length > 0 %}{{ (avg|sum / avg|length)|round(2) }}{% else %}-{% endif %}
+                    </h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title text-info"><i class="fas fa-book-open me-2"></i>Subjects</h5>
+                    <h2 class="mb-0">{{ progress_data|length }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card shadow-sm">
-        <div class="card-header">
-            <h2><i class="fas fa-chart-line me-2"></i>Student Progress Reports</h2>
+        <div class="card-header bg-light d-flex align-items-center">
+            <h2 class="mb-0"><i class="fas fa-chart-line me-2"></i>Student Progress Reports</h2>
         </div>
         <div class="card-body">
             <!-- Student Selection -->
             <div class="row mb-4">
                 <div class="col-md-6">
-                    <select class="form-control" id="studentSelect">
-                        <option value="">Select Student</option>
-                        {% for student in students %}
-                        <option value="{{ student._id }}">{{ student.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text"><i class="fas fa-user-graduate"></i></span>
+                        </div>
+                        <select class="form-control" id="studentSelect">
+                            <option value="">Select Student</option>
+                            {% for student in students %}
+                            <option value="{{ student._id }}">{{ student.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                 </div>
                 <div class="col-md-6">
-                    <select class="form-control" id="termSelect">
-                        <option value="current">Current Term</option>
-                        <option value="previous">Previous Term</option>
-                        <option value="all">All Terms</option>
-                    </select>
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text"><i class="fas fa-calendar-alt"></i></span>
+                        </div>
+                        <select class="form-control" id="termSelect">
+                            <option value="current">Current Term</option>
+                            <option value="previous">Previous Term</option>
+                            <option value="all">All Terms</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -38,7 +79,7 @@
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-body">
-                            <h5>Grade Distribution</h5>
+                            <h5 class="mb-3"><i class="fas fa-chart-pie me-2"></i>Grade Distribution</h5>
                             <canvas id="gradeChart"></canvas>
                         </div>
                     </div>
@@ -46,7 +87,7 @@
                 <div class="col-md-6">
                     <div class="card">
                         <div class="card-body">
-                            <h5>Subject Performance</h5>
+                            <h5 class="mb-3"><i class="fas fa-book-reader me-2"></i>Subject Performance</h5>
                             <canvas id="subjectChart"></canvas>
                         </div>
                     </div>
@@ -55,8 +96,8 @@
 
             <!-- Detailed Progress Table -->
             <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
+                <table class="table table-hover align-middle">
+                    <thead class="thead-light">
                         <tr>
                             <th>Subject</th>
                             <th>Average Grade</th>
@@ -66,9 +107,17 @@
                     </thead>
                     <tbody id="progressTableBody">
                         {% for progress in progress_data %}
-                        <tr>
-                            <td>{{ progress.subject }}</td>
-                            <td>{{ progress.average_grade }}</td>
+                        <tr class="table-row-hover">
+                            <td><i class="fas fa-book text-secondary me-1"></i> {{ progress.subject }}</td>
+                            <td>
+                                <span class="badge 
+                                    {% if progress.average_grade >= 90 %}bg-success
+                                    {% elif progress.average_grade >= 75 %}bg-info
+                                    {% elif progress.average_grade >= 60 %}bg-warning
+                                    {% else %}bg-danger{% endif %}">
+                                    {{ progress.average_grade }}
+                                </span>
+                            </td>
                             <td>
                                 {% if progress.trend == 'up' %}
                                 <i class="fas fa-arrow-up text-success"></i>
@@ -91,7 +140,229 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-// Add Chart.js initialization code here
+let gradeChart, subjectChart, attendanceChart, activityChart;
+
+function renderGradeChart(grades) {
+    const ctx = document.getElementById('gradeChart').getContext('2d');
+    if (gradeChart) gradeChart.destroy();
+    const gradeCounts = {};
+    grades.forEach(g => { gradeCounts[g] = (gradeCounts[g] || 0) + 1; });
+    gradeChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: Object.keys(gradeCounts),
+            datasets: [{
+                data: Object.values(gradeCounts),
+                backgroundColor: ['#4caf50', '#2196f3', '#ffc107', '#f44336', '#9c27b0', '#607d8b']
+            }]
+        },
+        options: { responsive: true }
+    });
+}
+
+function renderSubjectChart(subjects, scores) {
+    const ctx = document.getElementById('subjectChart').getContext('2d');
+    if (subjectChart) subjectChart.destroy();
+    subjectChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: subjects,
+            datasets: [{
+                label: 'Average Score',
+                data: scores,
+                backgroundColor: '#2196f3'
+            }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+}
+
+function updateProgressTable(progress) {
+    const tbody = document.getElementById('progressTableBody');
+    tbody.innerHTML = '';
+    progress.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.className = 'table-row-hover';
+        tr.innerHTML = `
+            <td><i class="fas fa-book text-secondary me-1"></i> ${row.subject}</td>
+            <td><span class="badge ${row.average_grade >= 90 ? 'bg-success' : row.average_grade >= 75 ? 'bg-info' : row.average_grade >= 60 ? 'bg-warning' : 'bg-danger'}">${row.average_grade}</span></td>
+            <td>${row.trend === 'up' ? '<i class="fas fa-arrow-up text-success"></i>' : row.trend === 'down' ? '<i class="fas fa-arrow-down text-danger"></i>' : '<i class="fas fa-equals text-warning"></i>'}</td>
+            <td>${row.comments || ''}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function calculateProgress(academicRecords) {
+    // Group by subject
+    const subjectStats = {};
+    academicRecords.forEach(rec => {
+        const subject = rec.subject || 'Unknown';
+        const grade = rec.grade;
+        const score = parseFloat(rec.score);
+        const comments = rec.comments || '';
+        if (!subjectStats[subject]) {
+            subjectStats[subject] = { subject, grades: [], scores: [], comments: [] };
+        }
+        if (grade) subjectStats[subject].grades.push(grade);
+        if (!isNaN(score)) subjectStats[subject].scores.push(score);
+        if (comments) subjectStats[subject].comments.push(comments);
+    });
+    // Calculate averages and trends
+    const progress = [];
+    Object.values(subjectStats).forEach(stat => {
+        const avgScore = stat.scores.length ? (stat.scores.reduce((a, b) => a + b, 0) / stat.scores.length) : 0;
+        let trend = 'equals';
+        if (stat.scores.length >= 2) {
+            if (stat.scores[stat.scores.length - 1] > stat.scores[stat.scores.length - 2]) trend = 'up';
+            else if (stat.scores[stat.scores.length - 1] < stat.scores[stat.scores.length - 2]) trend = 'down';
+        }
+        progress.push({
+            subject: stat.subject,
+            average_grade: avgScore.toFixed(2),
+            trend,
+            comments: stat.comments.join('; ')
+        });
+    });
+    return progress;
+}
+
+function renderAttendanceChart(records) {
+    const ctx = document.getElementById('attendanceChart').getContext('2d');
+    if (attendanceChart) attendanceChart.destroy();
+    const statusCounts = { Present: 0, Absent: 0 };
+    records.forEach(r => {
+        if (r.status && r.status.toLowerCase() === 'present') statusCounts.Present++;
+        else statusCounts.Absent++;
+    });
+    attendanceChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(statusCounts),
+            datasets: [{
+                data: Object.values(statusCounts),
+                backgroundColor: ['#4caf50', '#f44336']
+            }]
+        },
+        options: { responsive: true }
+    });
+}
+function updateAbsenceList(records) {
+    const ul = document.getElementById('absenceList');
+    ul.innerHTML = '';
+    const absences = records.filter(r => r.status && r.status.toLowerCase() !== 'present');
+    absences.slice(0, 5).forEach(a => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item';
+        li.textContent = `${a.date || ''}`;
+        ul.appendChild(li);
+    });
+    if (absences.length === 0) {
+        ul.innerHTML = '<li class="list-group-item text-success">No recent absences</li>';
+    }
+}
+function updateHealthList(records) {
+    const ul = document.getElementById('healthList');
+    ul.innerHTML = '';
+    records.slice(0, 5).forEach(r => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item';
+        li.textContent = `${r.date ? r.date.split('T')[0] : ''}: ${r.record_type || r.type || ''} - ${r.description || r.notes || ''}`;
+        ul.appendChild(li);
+    });
+    if (records.length === 0) {
+        ul.innerHTML = '<li class="list-group-item text-muted">No health records</li>';
+    }
+}
+function showHealthAlert(records) {
+    const alertDiv = document.getElementById('healthAlert');
+    const flagged = records.find(r => (r.status && r.status.toLowerCase() === 'pending') || (r.alert && r.alert === true));
+    if (flagged) {
+        alertDiv.textContent = 'Attention: Health issue or pending checkup!';
+        alertDiv.classList.remove('d-none');
+    } else {
+        alertDiv.classList.add('d-none');
+    }
+}
+function renderActivityChart(activities) {
+    const ctx = document.getElementById('activityChart').getContext('2d');
+    if (activityChart) activityChart.destroy();
+    const activityCounts = {};
+    activities.forEach(a => {
+        const name = a.activity_name || a.name || 'Activity';
+        activityCounts[name] = (activityCounts[name] || 0) + 1;
+    });
+    activityChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(activityCounts),
+            datasets: [{
+                label: 'Participation',
+                data: Object.values(activityCounts),
+                backgroundColor: '#9c27b0'
+            }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+}
+function updateActivityList(activities) {
+    const ul = document.getElementById('activityList');
+    ul.innerHTML = '';
+    activities.slice(0, 5).forEach(a => {
+        const li = document.createElement('li');
+        li.className = 'list-group-item';
+        li.textContent = `${a.activity_name || a.name || 'Activity'} (${a.date ? a.date.split('T')[0] : ''})`;
+        ul.appendChild(li);
+    });
+    if (activities.length === 0) {
+        ul.innerHTML = '<li class="list-group-item text-muted">No recent activities</li>';
+    }
+}
+
+document.getElementById('studentSelect').addEventListener('change', function() {
+    const studentId = this.value;
+    if (!studentId) return;
+    fetch(`/api/student/${studentId}/progress`)
+        .then(res => res.json())
+        .then(data => {
+            // Academic
+            const academic = data.academic_records || [];
+            const grades = academic.map(r => r.grade).filter(Boolean);
+            const subjects = [...new Set(academic.map(r => r.subject || 'Unknown'))];
+            const avgScores = subjects.map(subj => {
+                const scores = academic.filter(r => (r.subject || 'Unknown') === subj).map(r => parseFloat(r.score)).filter(s => !isNaN(s));
+                return scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : 0;
+            });
+            renderGradeChart(grades);
+            renderSubjectChart(subjects, avgScores);
+            // Progress Table
+            const progress = calculateProgress(academic);
+            updateProgressTable(progress);
+            // Attendance
+            const attendance = data.attendance_records || [];
+            renderAttendanceChart(attendance);
+            updateAbsenceList(attendance);
+            // Health
+            const health = data.health_records || [];
+            updateHealthList(health);
+            showHealthAlert(health);
+            // Activities
+            const activities = data.activities || [];
+            renderActivityChart(activities);
+            updateActivityList(activities);
+        });
+});
 </script>
 {% endblock %}
-{% endblock %} 
+{% endblock %}
+
+<style>
+.table-row-hover:hover {
+    background-color: #f5f7fa !important;
+    transition: background 0.2s;
+}
+.badge {
+    font-size: 1rem;
+    padding: 0.5em 0.75em;
+}
+</style> 

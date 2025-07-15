@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, Response, make_response
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -11,14 +11,36 @@ from werkzeug.utils import secure_filename
 import csv
 from io import StringIO
 from flask_socketio import SocketIO, emit
+import io
 
 from flask import Flask, render_template  # and your other imports
+from bson import ObjectId
+from datetime import datetime
+
+def serialize_doc(doc):
+    """Recursively serialize MongoDB documents for JSON response."""
+    if isinstance(doc, list):
+        return [serialize_doc(item) for item in doc]
+    elif isinstance(doc, dict):
+        new_doc = {}
+        for key, value in doc.items():
+            if isinstance(value, ObjectId):
+                new_doc[key] = str(value)
+            elif isinstance(value, datetime):
+                new_doc[key] = value.isoformat()
+            elif isinstance(value, (dict, list)):
+                new_doc[key] = serialize_doc(value)
+            else:
+                new_doc[key] = value
+        return new_doc
+    else:
+        return doc
 
 app = Flask(__name__, 
     template_folder='templates',
     static_folder='static'
 )
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode='threading')
 
 UPLOAD_FOLDER = 'static/uploads/children'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
@@ -498,38 +520,11 @@ def add_health_record():
 @role_required(['teacher'])
 def academic_records():
     try:
-        # Fetch all academic records with student and subject details
-        records = list(db.academic_records.aggregate([
-            {
-                '$lookup': {
-                    'from': 'children',
-                    'localField': 'student_id',
-                    'foreignField': '_id',
-                    'as': 'student'
-                }
-            },
-            {
-                '$lookup': {
-                    'from': 'subjects',
-                    'localField': 'subject_id',
-                    'foreignField': '_id',
-                    'as': 'subject'
-                }
-            },
-            {
-                '$sort': {'date': -1}
-            }
-        ]))
-        
-        # Get all subjects for the filter dropdown
-        subjects = list(db.subjects.find())
-        
-        return render_template('teacher/academic_records.html',
-                             records=records,
-                             subjects=subjects)
+        records = list(db.academic_records.find().sort('date', -1))
+        return render_template('teacher/academic_records.html', records=records)
     except Exception as e:
-        app.logger.error(f"Error fetching academic records: {str(e)}")
-        flash('Error loading academic records', 'error')
+        app.logger.error(f"Error accessing academic records: {str(e)}")
+        flash('An error occurred while accessing academic records', 'error')
         return redirect(url_for('teacher_dashboard'))
 
 @app.route('/add_academic_record', methods=['GET', 'POST'])
@@ -673,7 +668,7 @@ def medication_schedule():
                 'dosage': request.form['dosage'],
                 'frequency': request.form['frequency'],
                 'start_date': datetime.strptime(request.form['start_date'], '%Y-%m-%d'),
-                'end_date': datetime.strptime(request.form['end_date'], '%Y-%m-%d'),
+                'end_date': datetime.strptime(request.form.get('end_date'), '%Y-%m-%d'),
                 'notes': request.form['notes'],
                 'created_by': session['username'],
                 'created_at': datetime.now(),
@@ -740,25 +735,35 @@ def teacher_dashboard():
 @role_required(['teacher'])
 def student_assessment():
     if request.method == 'POST':
-        assessment_data = {
-            'student_id': request.form['student_id'],
-            'subject': request.form['subject'],
-            'assessment_type': request.form['assessment_type'],
-            'grade': request.form['grade'],
-            'comments': request.form['comments'],
-            'date': datetime.now(),
-            'teacher_id': session['user_id'],
-            'status': 'completed'
-        }
-        db.academic_records.insert_one(assessment_data)
-        flash('Assessment added successfully!', 'success')
+        try:
+            child = db.children.find_one({'_id': ObjectId(request.form['student_id'])})
+            student_name = child['name'] if child else 'Unknown'
+
+            assessment_data = {
+                'student_id': request.form['student_id'],
+                'student_name': student_name,
+                'subject': request.form['subject_name'],
+                'subject_code': request.form['subject_code'],
+                'assessment_type': request.form['assessment_type'],
+                'score': request.form['score'],
+                'grade': request.form['grade'],
+                'comments': request.form['comments'],
+                'date': datetime.now(),  # Always store as datetime
+                'teacher_id': session['user_id'],
+                'status': 'completed'
+            }
+            db.academic_records.insert_one(assessment_data)
+            flash('Assessment added successfully!', 'success')
+        except Exception as e:
+            app.logger.error(f"Error inserting assessment: {str(e)}")
+            flash('Error adding assessment. Please try again.', 'error')
         return redirect(url_for('teacher_dashboard'))
-    
+
     # Get students and subjects for the form
-    students = list(db.children.find())
-    subjects = list(db.subjects.find())
+    children = [serialize_doc(child) for child in db.children.find()]
+    subjects = [serialize_doc(subject) for subject in db.subjects.find()]
     return render_template('teacher/student_assessment.html', 
-                         students=students, 
+                         children=children, 
                          subjects=subjects)
 
 @app.route('/manage_subjects', methods=['GET', 'POST'])
@@ -798,11 +803,50 @@ def student_progress():
         return redirect(url_for('teacher_dashboard'))
 
 def calculate_student_progress():
-    # Implement your progress calculation logic here
-    # This should analyze academic records and return structured progress data
     try:
+        # Fetch all academic records
+        records = list(db.academic_records.find())
+        # Group by subject
+        subject_stats = {}
+        for rec in records:
+            subject = rec.get('subject', 'Unknown')
+            grade = rec.get('grade')
+            score = rec.get('score')
+            comments = rec.get('comments', '')
+            if subject not in subject_stats:
+                subject_stats[subject] = {
+                    'subject': subject,
+                    'grades': [],
+                    'scores': [],
+                    'comments': [],
+                }
+            if grade:
+                subject_stats[subject]['grades'].append(grade)
+            if score:
+                try:
+                    subject_stats[subject]['scores'].append(float(score))
+                except Exception:
+                    pass
+            if comments:
+                subject_stats[subject]['comments'].append(comments)
+        # Calculate averages and trends
         progress_data = []
-        # Add your calculation logic here
+        for subj, stat in subject_stats.items():
+            avg_score = sum(stat['scores']) / len(stat['scores']) if stat['scores'] else 0
+            # Simple trend: compare last two scores
+            trend = 'equals'
+            if len(stat['scores']) >= 2:
+                if stat['scores'][-1] > stat['scores'][-2]:
+                    trend = 'up'
+                elif stat['scores'][-1] < stat['scores'][-2]:
+                    trend = 'down'
+            avg_grade = stat['grades'][-1] if stat['grades'] else '-'
+            progress_data.append({
+                'subject': subj,
+                'average_grade': avg_score,
+                'trend': trend,
+                'comments': '; '.join(stat['comments'])
+            })
         return progress_data
     except Exception as e:
         app.logger.error(f"Error calculating progress: {str(e)}")
@@ -1260,11 +1304,13 @@ def update_settings():
 def get_child(child_id):
     try:
         child = db.children.find_one({'_id': ObjectId(child_id)})
-        if child:
-            child['_id'] = str(child['_id'])
-            child['age'] = calculate_age(child.get('date_of_birth'))
-            return jsonify(child)
-        return jsonify({'error': 'Child not found'}), 404
+        if not child:
+            return jsonify({'error': 'Child not found'}), 404
+        child['_id'] = str(child['_id'])
+        # Handle dob serialization
+        if 'dob' in child and child['dob']:
+            child['dob'] = str(child['dob'])
+        return jsonify(child)
     except Exception as e:
         logger.error(f"Error in get_child: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
@@ -1449,8 +1495,7 @@ def send_password_reset_email(username, temp_password):
     return False
 
 @socketio.on('connect')
-def handle_connect():
-    emit('user_list', list(db.users.find()), broadcast=True)
+
 
 @app.route('/admin/manage-users', methods=['GET', 'POST'])
 @role_required(['admin'])
@@ -1550,3 +1595,149 @@ def send_message():
 
 if __name__ == '__main__':
     socketio.run(app)
+
+@app.route('/api/update_academic_record/<record_id>', methods=['POST'])
+@role_required(['teacher'])
+def update_academic_record(record_id):
+    data = request.get_json()
+    update_data = {}
+    if 'grade' in data:
+        update_data['grade'] = data['grade']
+    if 'comments' in data:
+        update_data['comments'] = data['comments']
+    if update_data:
+        update_data['updated_at'] = datetime.now()
+        db.academic_records.update_one({'_id': ObjectId(record_id)}, {'$set': update_data})
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'No data to update'}), 400
+
+@app.route('/api/student/<student_id>/progress', methods=['GET'])
+@role_required(['admin', 'teacher', 'staff'])
+def api_student_progress(student_id):
+    try:
+        # Student profile
+        student = db.children.find_one({'_id': ObjectId(student_id)})
+        if not student:
+            return jsonify({'error': 'Student not found'}), 404
+        student_profile = serialize_doc(student)
+
+        # Academic records
+        academic_records = list(db.academic_records.find({'student_id': str(student_id)}))
+        academic_records = serialize_doc(academic_records)
+
+        # Attendance records
+        attendance_records = list(db.attendance.find({'child_id': str(student_id)}))
+        attendance_records = serialize_doc(attendance_records)
+
+        # Health records
+        health_records = list(db.health_records.find({'child_id': ObjectId(student_id)}))
+        health_records = serialize_doc(health_records)
+
+        # Activities (if you have an activities collection linked by child_id)
+        activities = list(db.activities.find({'child_id': str(student_id)})) if 'activities' in db.list_collection_names() else []
+        activities = serialize_doc(activities)
+
+        # Aggregate comments/feedback from academic records
+        comments = [rec.get('comments', '') for rec in academic_records if rec.get('comments')]
+
+        # Compose response
+        response = {
+            'profile': student_profile,
+            'academic_records': academic_records,
+            'attendance_records': attendance_records,
+            'health_records': health_records,
+            'activities': activities,
+            'comments': comments
+        }
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in api_student_progress: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/analytics/cohort')
+@role_required(['admin', 'teacher', 'staff'])
+def api_analytics_cohort():
+    group_by = request.args.get('group_by', 'class')
+    # Supported: class, age, gender
+    pipeline = []
+    if group_by == 'age':
+        pipeline.append({'$addFields': {'age': {'$subtract': [{'$year': datetime.now()}, {'$year': {'$toDate': '$dob'}}]}}})
+        group_field = '$age'
+    elif group_by == 'gender':
+        group_field = '$gender'
+    else:
+        group_field = '$education_level'
+    pipeline += [
+        {'$group': {
+            '_id': group_field,
+            'students': {'$push': '$_id'},
+            'count': {'$sum': 1}
+        }}
+    ]
+    cohorts = list(db.children.aggregate(pipeline))
+    # For each cohort, aggregate academic, attendance, health
+    results = []
+    for cohort in cohorts:
+        student_ids = [str(sid) for sid in cohort['students']]
+        academic = list(db.academic_records.find({'student_id': {'$in': student_ids}}))
+        attendance = list(db.attendance.find({'child_id': {'$in': student_ids}}))
+        health = list(db.health_records.find({'child_id': {'$in': [ObjectId(sid) for sid in student_ids]}}))
+        results.append({
+            'cohort': cohort['_id'],
+            'count': cohort['count'],
+            'academic': serialize_doc(academic),
+            'attendance': serialize_doc(attendance),
+            'health': serialize_doc(health)
+        })
+    return jsonify(results)
+
+@app.route('/api/analytics/trends')
+@role_required(['admin', 'teacher', 'staff'])
+def api_analytics_trends():
+    # Find students with declining grades, frequent absences, or health alerts
+    students = list(db.children.find())
+    flagged = []
+    for student in students:
+        sid = str(student['_id'])
+        records = list(db.academic_records.find({'student_id': sid}))
+        scores = [float(r.get('score', 0)) for r in records if r.get('score')]
+        trend = 'stable'
+        if len(scores) >= 3:
+            if scores[-1] < scores[-2] < scores[-3]:
+                trend = 'declining'
+        absences = list(db.attendance.find({'child_id': sid, 'status': {'$ne': 'present'}}))
+        health_alerts = list(db.health_records.find({'child_id': ObjectId(sid), 'status': 'pending'}))
+        if trend == 'declining' or len(absences) >= 3 or health_alerts:
+            flagged.append({
+                'student': serialize_doc(student),
+                'trend': trend,
+                'recent_absences': serialize_doc(absences),
+                'health_alerts': serialize_doc(health_alerts)
+            })
+    return jsonify(flagged)
+
+@app.route('/api/analytics/report')
+@role_required(['admin', 'teacher', 'staff'])
+def api_analytics_report():
+    # Filters: class, subject, date range, etc.
+    filters = {}
+    if 'class' in request.args:
+        filters['education_level'] = request.args['class']
+    if 'subject' in request.args:
+        filters['subject'] = request.args['subject']
+    if 'start_date' in request.args and 'end_date' in request.args:
+        filters['date'] = {'$gte': request.args['start_date'], '$lte': request.args['end_date']}
+    # Academic records filtered
+    records = list(db.academic_records.find(filters))
+    # CSV export
+    if request.args.get('export') == 'csv':
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=records[0].keys() if records else [])
+        writer.writeheader()
+        for row in records:
+            writer.writerow({k: str(v) for k, v in row.items()})
+        response = make_response(output.getvalue())
+        response.headers['Content-Disposition'] = 'attachment; filename=report.csv'
+        response.headers['Content-Type'] = 'text/csv'
+        return response
+    return jsonify(serialize_doc(records))

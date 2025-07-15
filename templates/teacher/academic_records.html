@@ -19,18 +19,18 @@
         <div class="card-body">
             <!-- Search and Filter Section -->
             <div class="row mb-3">
-                <div class="col-md-4">
-                    <input type="text" id="searchInput" class="form-control" placeholder="Search records...">
+                <div class="col-md-3">
+                    <input type="text" id="searchInput" class="form-control" placeholder="Search by student name...">
                 </div>
                 <div class="col-md-3">
                     <select class="form-control" id="subjectFilter">
                         <option value="">All Subjects</option>
-                        {% for subject in subjects %}
-                        <option value="{{ subject.name }}">{{ subject.name }}</option>
+                        {% for record in records|unique(attribute='subject') %}
+                        <option value="{{ record.subject }}">{{ record.subject }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <select class="form-control" id="gradeFilter">
                         <option value="">All Grades</option>
                         <option value="A">A</option>
@@ -40,46 +40,85 @@
                         <option value="F">F</option>
                     </select>
                 </div>
+                <div class="col-md-2">
+                    <input type="date" id="dateFilter" class="form-control" placeholder="Date">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" id="clearFilters">Clear Filters</button>
+                </div>
             </div>
 
+            <!-- Export and Pagination Controls -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <button class="btn btn-success" id="exportCSV"><i class="fas fa-file-csv me-2"></i>Export to CSV</button>
+                <nav>
+                    <ul class="pagination mb-0" id="pagination"></ul>
+                </nav>
+            </div>
             <!-- Records Table -->
             <div class="table-responsive">
-                <table class="table table-hover">
+                <table class="table table-hover align-middle" id="recordsTable">
                     <thead>
                         <tr>
-                            <th>Date</th>
-                            <th>Student</th>
-                            <th>Subject</th>
-                            <th>Assessment Type</th>
-                            <th>Score</th>
-                            <th>Grade</th>
+                            <th class="sortable" data-sort="date">Date <i class="fas fa-sort"></i></th>
+                            <th class="sortable" data-sort="student">Student <i class="fas fa-sort"></i></th>
+                            <th class="sortable" data-sort="subject">Subject <i class="fas fa-sort"></i></th>
+                            <th class="sortable" data-sort="assessment_type">Assessment <i class="fas fa-sort"></i></th>
+                            <th class="sortable" data-sort="score">Score <i class="fas fa-sort"></i></th>
+                            <th class="sortable" data-sort="grade">Grade <i class="fas fa-sort"></i></th>
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="recordsTableBody">
                         {% for record in records %}
                         <tr>
-                            <td>{{ record.date.strftime('%Y-%m-%d') }}</td>
-                            <td>{{ record.student_name }}</td>
-                            <td>{{ record.subject }}</td>
-                            <td>{{ record.assessment_type }}</td>
-                            <td>{{ record.score }}</td>
+                            <td>{% if record.date %}{% if record.date.strftime %}{{ record.date.strftime('%Y-%m-%d') }}{% else %}{{ record.date[:10] }}{% endif %}{% endif %}</td>
+                            <td><i class="fas fa-user-graduate text-secondary me-1"></i> {{ record.student_name }}</td>
+                            <td><i class="fas fa-book text-info me-1"></i> {{ record.subject }}</td>
+                            <td><span class="badge bg-info">{{ record.assessment_type }}</span></td>
+                            <td><span class="badge bg-primary">{{ record.score }}</span></td>
                             <td>
                                 <span class="badge bg-{{ record.grade|grade_color }}">
                                     {{ record.grade }}
                                 </span>
                             </td>
                             <td>
-                                <button class="btn btn-sm btn-info" data-bs-toggle="modal" 
-                                        data-bs-target="#viewModal{{ record._id }}">
+                                <input type="checkbox" class="record-checkbox" data-id="{{ record._id }}">
+                                <button class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#viewModal{{ record._id }}">
                                     <i class="fas fa-eye"></i>
                                 </button>
-                                <button class="btn btn-sm btn-warning" data-bs-toggle="modal" 
-                                        data-bs-target="#editModal{{ record._id }}">
+                                <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editModal{{ record._id }}">
                                     <i class="fas fa-edit"></i>
                                 </button>
                             </td>
                         </tr>
+                        <!-- View Modal -->
+                        <div class="modal fade" id="viewModal{{ record._id }}" tabindex="-1" aria-labelledby="viewModalLabel{{ record._id }}" aria-hidden="true">
+                          <div class="modal-dialog">
+                            <div class="modal-content">
+                              <div class="modal-header">
+                                <h5 class="modal-title" id="viewModalLabel{{ record._id }}">Assessment Details</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                              </div>
+                              <div class="modal-body">
+                                <ul class="list-group list-group-flush">
+                                  <li class="list-group-item"><strong>Date:</strong> {{ record.date.strftime('%Y-%m-%d') }}</li>
+                                  <li class="list-group-item"><strong>Student:</strong> {{ record.student_name }}</li>
+                                  <li class="list-group-item"><strong>Subject:</strong> {{ record.subject }}</li>
+                                  <li class="list-group-item"><strong>Subject Code:</strong> {{ record.subject_code }}</li>
+                                  <li class="list-group-item"><strong>Assessment Type:</strong> {{ record.assessment_type }}</li>
+                                  <li class="list-group-item"><strong>Score:</strong> {{ record.score }}</li>
+                                  <li class="list-group-item"><strong>Grade:</strong> {{ record.grade }}</li>
+                                  <li class="list-group-item"><strong>Comments:</strong> {{ record.comments }}</li>
+                                </ul>
+                                <button class="btn btn-outline-secondary mt-3" onclick="window.print()"><i class="fas fa-print me-1"></i>Print</button>
+                              </div>
+                              <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -87,4 +126,204 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// --- Export to CSV ---
+document.getElementById('exportCSV').addEventListener('click', function() {
+    let csv = [];
+    const rows = document.querySelectorAll('#recordsTable tr');
+    for (let row of rows) {
+        let cols = Array.from(row.querySelectorAll('th,td')).map(td => '"' + td.innerText.replace(/"/g, '""') + '"');
+        csv.push(cols.join(','));
+    }
+    const csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
+    const downloadLink = document.createElement('a');
+    downloadLink.download = 'academic_records.csv';
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = 'none';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+});
+
+// --- Pagination ---
+const rowsPerPage = 10;
+let currentPage = 1;
+const table = document.getElementById('recordsTable');
+const tableBody = document.getElementById('recordsTableBody');
+const pagination = document.getElementById('pagination');
+function showPage(page) {
+    const rows = tableBody.querySelectorAll('tr');
+    const totalRows = rows.length;
+    const totalPages = Math.ceil(totalRows / rowsPerPage);
+    for (let i = 0; i < totalRows; i++) {
+        rows[i].style.display = (i >= (page-1)*rowsPerPage && i < page*rowsPerPage) ? '' : 'none';
+    }
+    pagination.innerHTML = '';
+    for (let i = 1; i <= totalPages; i++) {
+        const li = document.createElement('li');
+        li.className = 'page-item' + (i === page ? ' active' : '');
+        const a = document.createElement('a');
+        a.className = 'page-link';
+        a.innerText = i;
+        a.href = '#';
+        a.onclick = function(e) { e.preventDefault(); showPage(i); };
+        li.appendChild(a);
+        pagination.appendChild(li);
+    }
+}
+showPage(currentPage);
+
+// --- Column Sorting ---
+let sortDirection = {};
+document.querySelectorAll('.sortable').forEach(function(header, idx) {
+    header.addEventListener('click', function() {
+        const sortKey = header.getAttribute('data-sort');
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        const colIdx = idx;
+        sortDirection[sortKey] = !sortDirection[sortKey];
+        rows.sort(function(a, b) {
+            let aText = a.cells[colIdx].innerText;
+            let bText = b.cells[colIdx].innerText;
+            if (!isNaN(aText) && !isNaN(bText)) {
+                aText = parseFloat(aText); bText = parseFloat(bText);
+            }
+            if (aText < bText) return sortDirection[sortKey] ? -1 : 1;
+            if (aText > bText) return sortDirection[sortKey] ? 1 : -1;
+            return 0;
+        });
+        for (let row of rows) tableBody.appendChild(row);
+        showPage(1);
+    });
+});
+
+// --- Row Highlighting by Grade ---
+for (const row of tableBody.rows) {
+    const gradeCell = row.cells[5];
+    if (gradeCell && gradeCell.innerText === 'F') {
+        row.style.backgroundColor = '#ffe5e5';
+    }
+}
+
+// --- Bulk Actions ---
+// (For demonstration: only export selected rows)
+document.getElementById('exportCSV').addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    let csv = [];
+    const checked = document.querySelectorAll('.record-checkbox:checked');
+    if (checked.length === 0) return;
+    let header = Array.from(table.querySelectorAll('th')).map(th => '"' + th.innerText.replace(/"/g, '""') + '"').join(',');
+    csv.push(header);
+    for (let box of checked) {
+        const row = box.closest('tr');
+        let cols = Array.from(row.querySelectorAll('td')).map(td => '"' + td.innerText.replace(/"/g, '""') + '"');
+        csv.push(cols.join(','));
+    }
+    const csvFile = new Blob([csv.join('\n')], {type: 'text/csv'});
+    const downloadLink = document.createElement('a');
+    downloadLink.download = 'selected_academic_records.csv';
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = 'none';
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+});
+
+// --- Filtering (reuse previous code) ---
+const searchInput = document.getElementById('searchInput');
+const subjectFilter = document.getElementById('subjectFilter');
+const gradeFilter = document.getElementById('gradeFilter');
+const dateFilter = document.getElementById('dateFilter');
+const clearFilters = document.getElementById('clearFilters');
+function filterTable() {
+    const search = searchInput.value.toLowerCase();
+    const subject = subjectFilter.value;
+    const grade = gradeFilter.value;
+    const date = dateFilter.value;
+    for (const row of tableBody.rows) {
+        const student = row.cells[1].innerText.toLowerCase();
+        const subj = row.cells[2].innerText;
+        const grd = row.cells[5].innerText;
+        const dt = row.cells[0].innerText;
+        let show = true;
+        if (search && !student.includes(search)) show = false;
+        if (subject && subj !== subject) show = false;
+        if (grade && grd !== grade) show = false;
+        if (date && dt !== date) show = false;
+        row.style.display = show ? '' : 'none';
+    }
+    showPage(1);
+}
+searchInput.addEventListener('input', filterTable);
+subjectFilter.addEventListener('change', filterTable);
+gradeFilter.addEventListener('change', filterTable);
+dateFilter.addEventListener('change', filterTable);
+clearFilters.addEventListener('click', function() {
+    searchInput.value = '';
+    subjectFilter.value = '';
+    gradeFilter.value = '';
+    dateFilter.value = '';
+    filterTable();
+});
+
+// --- Inline Editing for Grade and Comments ---
+document.querySelectorAll('.btn-warning').forEach(function(editBtn) {
+    editBtn.addEventListener('click', function() {
+        const row = editBtn.closest('tr');
+        if (!row) return;
+        if (row.classList.contains('editing')) return;
+        row.classList.add('editing');
+        const gradeCell = row.cells[5];
+        const currentGrade = gradeCell.innerText.trim();
+        gradeCell.innerHTML = `<select class='form-control form-control-sm' id='editGrade'>
+            <option value='A' ${currentGrade==='A'?'selected':''}>A</option>
+            <option value='B' ${currentGrade==='B'?'selected':''}>B</option>
+            <option value='C' ${currentGrade==='C'?'selected':''}>C</option>
+            <option value='D' ${currentGrade==='D'?'selected':''}>D</option>
+            <option value='F' ${currentGrade==='F'?'selected':''}>F</option>
+        </select>`;
+        let commentsRow = document.createElement('tr');
+        commentsRow.className = 'edit-row';
+        let td = document.createElement('td');
+        td.colSpan = row.cells.length;
+        td.innerHTML = `<label class='mb-1'><i class='fas fa-comment'></i> Edit Comments:</label><textarea class='form-control' id='editComments' rows='2'>${row.getAttribute('data-comments')||''}</textarea>
+            <div class='mt-2'>
+                <button class='btn btn-success btn-sm' id='saveEdit'><i class='fas fa-save'></i> Save</button>
+                <button class='btn btn-secondary btn-sm' id='cancelEdit'><i class='fas fa-times'></i> Cancel</button>
+                <span id='editStatus' class='ms-3'></span>
+            </div>`;
+        commentsRow.appendChild(td);
+        row.parentNode.insertBefore(commentsRow, row.nextSibling);
+        td.querySelector('#cancelEdit').onclick = function() {
+            row.classList.remove('editing');
+            gradeCell.innerHTML = `<span class='badge bg-${currentGrade.toLowerCase()}'>${currentGrade}</span>`;
+            commentsRow.remove();
+        };
+        td.querySelector('#saveEdit').onclick = function() {
+            const newGrade = td.querySelector('#editGrade').value;
+            const newComments = td.querySelector('#editComments').value;
+            const recordId = row.querySelector('.record-checkbox').getAttribute('data-id');
+            fetch(`/api/update_academic_record/${recordId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({grade: newGrade, comments: newComments})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    gradeCell.innerHTML = `<span class='badge bg-${newGrade.toLowerCase()}'>${newGrade}</span>`;
+                    row.setAttribute('data-comments', newComments);
+                    row.classList.remove('editing');
+                    commentsRow.remove();
+                } else {
+                    td.querySelector('#editStatus').innerHTML = `<span class='text-danger'>Error saving changes</span>`;
+                }
+            })
+            .catch(() => {
+                td.querySelector('#editStatus').innerHTML = `<span class='text-danger'>Error saving changes</span>`;
+            });
+        };
+    });
+});
+</script>
 {% endblock %} 
