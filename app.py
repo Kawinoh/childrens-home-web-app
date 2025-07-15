@@ -267,7 +267,7 @@ def logout():
 
 # Children Management Routes
 @app.route('/view_children')
-@role_required(['staff', 'teacher'])  # Added teacher role
+@role_required(['staff', 'teacher', 'admin'])  # Added teacher role
 def view_children():
     if 'username' not in session:
         flash('Please login to continue', 'error')
@@ -288,7 +288,7 @@ def view_children():
         return redirect(url_for('staff_dashboard'))
 
 @app.route('/add_child', methods=['GET', 'POST'])
-@role_required(['staff', 'teacher'])  # Added teacher role
+@role_required(['staff', 'teacher', 'admin'])  # Added teacher role
 def add_child():
     if 'username' not in session:
         flash('Session expired. Please login again.', 'error')
@@ -316,15 +316,33 @@ def add_child():
                 'notes': request.form.get('notes', '').strip(),
                 'registration_date': datetime.now(),
                 'registered_by': session['username'],
+                'registered_by_role': session['role'],  # Add role tracking
                 'status': 'active',
                 'child_id': generate_child_id(),
                 'age': calculate_age(request.form.get('dob')),
-                'photo': photo_filename  # Add the photo filename to database
+                'photo': photo_filename,  # Add the photo filename to database
+                'education_level': request.form.get('education_level', '').strip(),
+                'previous_school': request.form.get('previous_school', '').strip(),
+                'special_needs': request.form.get('special_needs', '').strip()
             }
 
             db.children.insert_one(child_data)
-            flash('Child added successfully!', 'success')
-            return redirect(url_for('view_children'))
+            
+            # Role-specific success messages
+            role_messages = {
+                'teacher': 'Student added successfully!',
+                'staff': 'Child added successfully!',
+                'admin': 'Child record added successfully!'
+            }
+            flash(role_messages.get(session['role'], 'Child added successfully!'), 'success')
+
+            # Return to appropriate dashboard
+            if session['role'] == 'teacher':
+                return redirect(url_for('teacher_dashboard'))
+            elif session['role'] == 'staff':
+                return redirect(url_for('staff_dashboard'))
+            else:
+                return redirect(url_for('admin_dashboard'))
 
     except Exception as e:
         app.logger.error(f"Error in add_child: {str(e)}")
@@ -1266,6 +1284,9 @@ def update_child(child_id):
             'date_of_birth': request.form.get('date_of_birth'),
             'guardian_name': request.form.get('guardian_name'),
             'status': request.form.get('status'),
+            'education_level': request.form.get('education_level'),
+            'previous_school': request.form.get('previous_school'),
+            'special_needs': request.form.get('special_needs'),
             'last_updated': datetime.now(),
             'updated_by': session.get('username')
         }
@@ -1528,4 +1549,4 @@ def send_message():
         return jsonify({'success': False, 'message': str(e)})
 
 if __name__ == '__main__':
-    socketio.run(app) 
+    socketio.run(app)

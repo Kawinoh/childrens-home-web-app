@@ -1,12 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container">
-     <!-- Back to Dashboard Button -->
- <div class="mb-3 d-flex justify-content-end">
-    <a href="{{ url_for('staff_dashboard') }}" class="btn btn-primary">
-        <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
-    </a>
-</div>
+    <!-- Back to Dashboard Button -->
+    <div class="mb-3 d-flex justify-content-end">
+        {% if session.role == 'teacher' %}
+        <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-primary">
+        {% elif session.role == 'staff' %}
+        <a href="{{ url_for('staff_dashboard') }}" class="btn btn-primary">
+        {% else %}
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-primary">
+        {% endif %}
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+    </div>
     <div class="form-card">
         <h2>Add New Child</h2>
         
@@ -161,4 +167,4 @@ document.getElementById('photo').addEventListener('change', function(e) {
     transform: scale(1.05);
 }
 </style>
-{% endblock %} 
+{% endblock %}
